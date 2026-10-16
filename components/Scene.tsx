@@ -6,9 +6,9 @@ import { PointerLockControls, Environment, RoundedBox, PerformanceMonitor } from
 import { Physics, RigidBody, CuboidCollider, CylinderCollider, RapierRigidBody } from "@react-three/rapier";
 import { EffectComposer, Bloom, ToneMapping, SMAA, Vignette, N8AO } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
-import { useGame, initialItems, DIM, SUBS, total, aimRef, livePos, hoodReady, FIXED, MISSIONS, getPos, TIPBOX_POS } from "@/lib/game";
+import { useGame, initialItems, DIM, SUBS, total, aimRef, livePos, hoodReady, FIXED, MISSIONS, getPos, TIPBOX_POS, HIDDEN } from "@/lib/game";
 import { sfx } from "@/lib/sound";
-import { ItemMesh, Incubator, Microscope, Hood, TipBox, Waste, Bath, Centrifuge, Thermocycler, GelBox, Coat, Steel, Plastic, Label, useCanvasTex } from "./models";
+import { ItemMesh, Incubator, Microscope, Hood, TipBox, Waste, Bath, Centrifuge, Thermocycler, GelBox, Freezer, Coat, Steel, Plastic, Label, useCanvasTex } from "./models";
 
 const pickables = new Set<THREE.Object3D>();
 function useReg(ref: React.RefObject<THREE.Object3D | null>, deps: unknown[] = []) { useEffect(() => { const o = ref.current; if (o) pickables.add(o); return () => { if (o) pickables.delete(o); }; }, deps); } // eslint-disable-line
@@ -19,7 +19,7 @@ const heldRef: { g: THREE.Object3D | null } = { g: null };
 const COLL: { p: [number, number, number]; h: [number, number, number] }[] = [
   { p: [0, -0.1, 0], h: [6, 0.1, 5] }, { p: [0.2, 0.45, -3.9], h: [4.8, 0.45, 0.6] }, { p: [-5.5, 0.45, 0.1], h: [0.4, 0.45, 2.4] }, { p: [5.5, 0.45, 0.1], h: [0.4, 0.45, 2.4] },
   { p: [0, 1.35, -4.47], h: [1.2, 0.45, 0.03] }, { p: [-1.17, 1.35, -4.0], h: [0.03, 0.45, 0.5] }, { p: [1.17, 1.35, -4.0], h: [0.03, 0.45, 0.5] }, { p: [0, 1.83, -4.0], h: [1.2, 0.03, 0.5] },
-  { p: [-5.3, 0.65, -4.0], h: [0.42, 0.65, 0.42] }, { p: [0, 1.5, -5.05], h: [6, 1.5, 0.05] }, { p: [0, 1.5, 5.05], h: [6, 1.5, 0.05] }, { p: [-6.05, 1.5, 0], h: [0.05, 1.5, 5] }, { p: [6.05, 1.5, 0], h: [0.05, 1.5, 5] },
+  { p: [5.45, 0.5, 3.7], h: [0.37, 0.5, 0.42] }, { p: [-5.3, 0.65, -4.0], h: [0.42, 0.65, 0.42] }, { p: [0, 1.5, -5.05], h: [6, 1.5, 0.05] }, { p: [0, 1.5, 5.05], h: [6, 1.5, 0.05] }, { p: [-6.05, 1.5, 0], h: [0.05, 1.5, 5] }, { p: [6.05, 1.5, 0], h: [0.05, 1.5, 5] },
 ];
 function Statics() { return <RigidBody type="fixed" colliders={false}>{COLL.map((c, i) => <CuboidCollider key={i} position={c.p} args={c.h} friction={0.8} />)}</RigidBody>; }
 
@@ -27,7 +27,7 @@ function ItemBody({ id }: { id: string }) {
   const item = useGame(s => s.items[id]); const held = useGame(s => s.held === id); const tip = useGame(s => !!s.pip.tip);
   const rb = useRef<RapierRigidBody>(null); const grp = useRef<THREE.Group>(null); useReg(grp, [held, item.loc, item.pos]);
   useFrame(() => { const b = rb.current; if (!b || item.loc || held) return; let t; try { t = b.translation(); } catch { return; } livePos[id] = [t.x, t.y, t.z]; if (t.y < -0.5) { b.setTranslation({ x: 0, y: 1.2, z: -2.5 }, true); b.setLinvel({ x: 0, y: 0, z: 0 }, true); } });
-  if (held) return null; const d = DIM[item.kind];
+  if (held || HIDDEN.has(item.loc ?? "")) return null; const d = DIM[item.kind];
   const col = item.kind === "cflask" ? <CuboidCollider args={[0.075, 0.018, 0.045]} position={[0, 0.018, 0]} /> : item.kind === "hemo" ? <CuboidCollider args={[0.037, 0.005, 0.016]} position={[0, 0.005, 0]} /> : <CylinderCollider args={[d.h / 2, d.r]} position={[0, d.h / 2, 0]} />;
   return (<RigidBody key={`${item.pos.join(",")}|${item.loc}`} ref={rb} position={item.pos} type={item.loc ? "fixed" : "dynamic"} colliders={false} enabledRotations={[false, true, false]} linearDamping={0.6} angularDamping={2} friction={0.9} canSleep>
     {col}<group ref={grp} userData={{ pk: { type: "item", id } }}><ItemMesh item={item} tip={id === "pipette" && tip} /></group></RigidBody>);
@@ -101,6 +101,7 @@ function Station() {
     <Fixed id="coat" pos={[-5.5, 0, 3.4]}><Coat /></Fixed>
     <Fixed id="incubator" pos={[-5.3, 0, -4.0]}><Incubator ready={ready} /></Fixed>
     <Fixed id="microscope" pos={[-5.5, 0.9, -0.4]} rot={Math.PI / 2}><Microscope lit={lit} /></Fixed>
+    <Fixed id="freezer" pos={[5.5, 0, 3.7]}><Freezer /></Fixed>
     <Fixed id="gel" pos={[-5.5, 0.9, 1.4]} rot={Math.PI / 2}><GelBox /></Fixed>
     <Fixed id="bath" pos={[5.5, 0.9, 2.0]} rot={-Math.PI / 2}><Bath running={true} />{void bath}</Fixed>
     <Fixed id="centrifuge" pos={[5.5, 0.9, -1.4]} rot={-Math.PI / 2}><Centrifuge /></Fixed>

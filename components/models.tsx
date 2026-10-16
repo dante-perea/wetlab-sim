@@ -33,7 +33,7 @@ const lathe = (f: (y: number) => number, y0: number, y1: number, n = 14, seg = 2
 export function liquidColor(it: Item) {
   const t = total(it.contents); const c = new THREE.Color(0, 0, 0); if (t <= 0) return c.set("#ffffff");
   for (const k in it.contents) c.add(new THREE.Color(SUBS[k]?.color ?? "#fff").multiplyScalar(it.contents[k] / t));
-  if (it.contaminated) c.lerp(new THREE.Color("#b6a93a"), 0.7);
+  if (it.contaminated && !it.blind) c.lerp(new THREE.Color("#b6a93a"), 0.7);
   return c;
 }
 function Liquid({ kind, fill, color, contaminated }: { kind: Kind; fill: number; color: THREE.Color; contaminated: boolean }) {
@@ -69,7 +69,7 @@ export function ItemMesh({ item, tip, loaded, loadedFrac = 0, plunger = 0, set =
   const col = useMemo(() => liquidColor(item), [item]); const fill = item.cap ? Math.min(1, total(item.contents) / item.cap) : 0;
   const k = item.kind; const P = PROF[k as Kind];
   const outer = useMemo(() => (P ? lathe(P.outer, 0, P.H, 16) : null), [k]); // eslint-disable-line
-  const warn = item.contaminated && (<>{[0, 1, 2, 3, 4, 5, 6].map(i => (<mesh key={i} position={[Math.cos(i * 1.9) * 0.012, 0.02 + i * 0.012, Math.sin(i * 1.9) * 0.012]}><sphereGeometry args={[0.0045, 8, 8]} /><meshStandardMaterial color="#7a8f1a" emissive="#4a5a05" emissiveIntensity={0.6} /></mesh>))}<mesh position={[0, DIM[k].h + 0.07, 0]}><sphereGeometry args={[0.011, 10, 10]} /><Emit c="#ff3b30" i={2.5} /></mesh></>);
+  const warn = item.contaminated && !item.blind && (<>{[0, 1, 2, 3, 4, 5, 6].map(i => (<mesh key={i} position={[Math.cos(i * 1.9) * 0.012, 0.02 + i * 0.012, Math.sin(i * 1.9) * 0.012]}><sphereGeometry args={[0.0045, 8, 8]} /><meshStandardMaterial color="#7a8f1a" emissive="#4a5a05" emissiveIntensity={0.6} /></mesh>))}<mesh position={[0, DIM[k].h + 0.07, 0]}><sphereGeometry args={[0.011, 10, 10]} /><Emit c="#ff3b30" i={2.5} /></mesh></>);
   if (k === "pipette") return <Pipette tip={!!tip} loaded={loaded ?? null} loadedFrac={loadedFrac} plunger={plunger} set={set} />;
   if (k === "ethanol") return (<group>
     <mesh position={[0, 0.095, 0]}><cylinderGeometry args={[0.036, 0.04, 0.19, 24]} /><Plastic c="#f7f7f7" r={0.3} /></mesh>
@@ -82,14 +82,14 @@ export function ItemMesh({ item, tip, loaded, loadedFrac = 0, plunger = 0, set =
     {fill > 0 && <mesh position={[0, 0.003 + 0.012 * Math.min(1, fill * 2), 0]}><boxGeometry args={[0.144, 0.006 + 0.024 * Math.min(1, fill * 2), 0.084]} /><meshPhysicalMaterial color={col} transparent opacity={0.82} roughness={0.1} /></mesh>}
     <mesh position={[0.088, 0.02, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.014, 0.014, 0.03, 18]} /><Plastic c="#2b64d8" /></mesh>
     <Label text="T25" w={0.04} h={0.02} pos={[-0.03, 0.0357, 0]} rot={[-Math.PI / 2, 0, 0]} bg="#fff" font={52} />
-    {item.contaminated && <mesh position={[0, 0.07, 0]}><sphereGeometry args={[0.011, 10, 10]} /><Emit c="#ff3b30" i={2.5} /></mesh>}
+    {item.contaminated && !item.blind && <mesh position={[0, 0.07, 0]}><sphereGeometry args={[0.011, 10, 10]} /><Emit c="#ff3b30" i={2.5} /></mesh>}
     <mesh position={[0, 0.02, 0]}><boxGeometry args={[0.17, 0.05, 0.11]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh></group>);
   if (k === "hemo") return (<group>
     <mesh position={[0, 0.004, 0]}><boxGeometry args={[0.075, 0.008, 0.032]} />{glass}</mesh>
     <mesh position={[0, 0.0085, 0]}><boxGeometry args={[0.03, 0.0008, 0.02]} /><meshStandardMaterial color="#9fd0c9" metalness={0.6} roughness={0.3} /></mesh>
     {item.cells > 0 && <mesh position={[0, 0.0095, 0]}><boxGeometry args={[0.028, 0.0008, 0.018]} /><meshStandardMaterial color="#3a6ea5" transparent opacity={0.7} /></mesh>}
     <mesh position={[0, 0.02, 0]}><boxGeometry args={[0.1, 0.05, 0.07]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh></group>);
-  const cap = k === "tube" ? "#f0f0f0" : k === "bottle" ? (item.id === "tripan" ? "#1b2a9a" : item.id === "stock" ? "#c43a3a" : item.id === "sfb" ? "#d8a438" : "#2b64d8") : k === "cryo" ? "#d03030" : "#f4b400";
+  const cap = k === "tube" ? "#f0f0f0" : k === "bottle" ? (item.id === "tripan" ? "#1b2a9a" : item.id === "tripsina" ? "#e8d9a0" : item.id === "dmso" ? "#e0e0e0" : item.id === "stock" ? "#c43a3a" : item.id === "sfb" ? "#d8a438" : "#2b64d8") : k === "cryo" ? "#d03030" : "#f4b400";
   const d = DIM[k]; const fr = k === "tube" ? 0.014 : 0.016;
   return (<group>
     {outer && <mesh geometry={outer}>{glass}</mesh>}
@@ -97,7 +97,7 @@ export function ItemMesh({ item, tip, loaded, loadedFrac = 0, plunger = 0, set =
     {k === "tube" && <><Cap r={0.02} y={d.h + 0.003} c={cap} h={0.012} /><mesh position={[0.022, d.h, 0]}><boxGeometry args={[0.012, 0.01, 0.014]} /><Plastic c={cap} /></mesh>
       <Label text={item.id.replace("tube", "")} w={0.026} h={0.026} pos={[0, 0.07, 0.0204]} bg="#fff" font={90} /></>}
     {(k === "bottle" || k === "flask") && <><Cap r={k === "bottle" ? 0.024 : 0.024} y={d.h + 0.004} c={cap} h={0.018} />
-      <Label text={item.id === "pbs" ? "PBS" : item.id === "medio" ? "DMEM\n+ rojo fenol" : item.id === "sfb" ? "SFB" : item.id === "stock" ? "STOCK\n10 mg/mL" : item.id === "tripan" ? "TRIPÁN\n0,4 %" : item.label} w={0.07} h={0.06} pos={[0, 0.07, k === "bottle" ? 0.0505 : 0.052]} rot={k === "flask" ? [-0.38, 0, 0] : [0, 0, 0]} font={34} /></>}
+      <Label text={item.id === "pbs" ? "PBS" : item.id === "medio" ? "DMEM\n+ rojo fenol" : item.id === "sfb" ? "SFB" : item.id === "stock" ? "STOCK\n10 mg/mL" : item.id === "tripan" ? "TRIPÁN\n0,4 %" : item.id === "tripsina" ? "TRIPSINA\nEDTA" : item.id === "dmso" ? "DMSO" : item.label} w={0.07} h={0.06} pos={[0, 0.07, k === "bottle" ? 0.0505 : 0.052]} rot={k === "flask" ? [-0.38, 0, 0] : [0, 0, 0]} font={34} /></>}
     {k === "cryo" && <><Cap r={0.016} y={d.h + 0.005} c={cap} h={0.012} />{item.frozen && <mesh position={[0, 0.03, 0]}><cylinderGeometry args={[0.0125, 0.0105, 0.04, 14]} /><meshStandardMaterial color="#e9f6ff" emissive="#9fd6ff" emissiveIntensity={0.2} roughness={0.9} /></mesh>}<Label text="HeLa\np12" w={0.02} h={0.02} pos={[0, 0.04, 0.0162]} font={40} /></>}
     {warn}{void fr}
     <Hit r={d.r} h={d.h} /></group>);
@@ -203,4 +203,10 @@ export function Coat() {
     <mesh position={[0.16, 1.6, 0.075]}><boxGeometry args={[0.18, 0.05, 0.01]} /><meshStandardMaterial color="#f7f8f8" roughness={0.85} /></mesh>
     <mesh position={[0.1, 0.55, 0.12]}><boxGeometry args={[0.2, 0.12, 0.14]} /><Plastic c="#4aa3ff" /></mesh>
     <Label text={"GUANTES\nNITRILO"} w={0.16} h={0.08} pos={[0.1, 0.55, 0.1915]} bg="#4aa3ff" fg="#fff" font={26} /></group>);
+}
+export function Freezer() {
+  return (<group><RoundedBox args={[0.7, 1.0, 0.8]} radius={0.03} smoothness={3} position={[0, 0.5, 0]}><Plastic c="#e9eef1" r={0.35} /></RoundedBox>
+    <mesh position={[-0.355, 0.62, 0]}><boxGeometry args={[0.02, 0.5, 0.04]} /><Steel c="#8b949a" /></mesh>
+    <Label text={"−80 °C"} w={0.2} h={0.07} pos={[-0.356, 0.82, 0.2]} rot={[0, -Math.PI / 2, 0]} bg="#06130b" fg="#7fd3ff" font={40} emissive />
+    <Label text={"CONGELADOR\nULTRA-BAJO"} w={0.3} h={0.08} pos={[-0.356, 0.4, -0.1]} rot={[0, -Math.PI / 2, 0]} bg="#e9eef1" fg="#345" font={22} /></group>);
 }

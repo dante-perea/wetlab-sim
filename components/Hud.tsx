@@ -15,7 +15,7 @@ export function Hud({ lock }: { lock: () => void }) {
   const a = s.aim; const it = a.type === "item" ? s.items[a.id] : null; const held = s.held ? s.items[s.held] : null;
   const ready = hoodReady(s); const warm = s.hoodOn && !ready ? Math.max(0, Math.ceil((READY_MS - (s.now - s.hoodOnAt)) / 1000)) : 0;
   let aimTxt = ""; let act = "";
-  if (it) { const c = it.kind === "cflask" ? ` · ${Math.min(100, Math.round((it.cells / FLASK_AREA / CONF_100) * 100))} % confluencia` : ""; aimTxt = `${it.label}${it.cap ? " · " + fmt(it.contents) : ""}${c}${it.frozen ? " · ❄ congelado" : ""}${it.contaminated ? " · ⚠ CONTAMINADO (" + it.reason + ")" : ""}`; act = !held ? "[E] Coger" : ""; }
+  if (it) { const c = it.kind === "cflask" ? ` · ${Math.min(100, Math.round((it.cells / FLASK_AREA / CONF_100) * 100))} % confluencia` : ""; aimTxt = `${it.label}${it.cap ? " · " + fmt(it.contents) : ""}${c}${it.frozen ? " · ❄ congelado" : ""}${it.contaminated && !it.blind ? " · ⚠ CONTAMINADO (" + it.reason + ")" : ""}`; act = !held ? "[E] Coger" : ""; }
   else if (a.type === "fixed") aimTxt = `${FIXED[a.id].label} — ${FIXED[a.id].hint}`; else if (a.type === "surface" && held && a.up) aimTxt = "[E] Dejar aquí";
   const incub = Object.values(s.items).find(i => i.loc === "incubator" && i.kind === "cflask");
   return (<div className="hud">
@@ -41,7 +41,7 @@ export function Hud({ lock }: { lock: () => void }) {
         <tr><td>W A S D</td><td>moverse (Shift: rápido)</td></tr><tr><td>Ratón</td><td>mirar</td></tr><tr><td>E</td><td>coger / dejar / usar equipo</td></tr>
         <tr><td>Clic izq.</td><td>usar lo que llevas (pipeta, spray, punta)</td></tr><tr><td>Rueda · ↑↓ ←→</td><td>volumen de la pipeta</td></tr><tr><td>R</td><td>expulsar punta</td></tr><tr><td>N</td><td>reponer laboratorio</td></tr><tr><td>Esc</td><td>pausa</td></tr><tr><td>Supr (en pausa)</td><td>borrar progreso</td></tr></tbody></table>
       <p className="small">📚 Lectura inicial: <a href={READING.url} target="_blank" rel="noreferrer">{READING.authors} ({READING.year}). {READING.title}. {READING.journal}</a></p>
-      <p className="small">Módulo 1 completo, módulo 2 parcial, módulo 3 parcial (descongelar, sembrar, incubadora, microscopio, hemocitómetro). Pendiente: pasar/congelar células, 4–6. Progreso guardado en este navegador.</p>
+      <p className="small">Módulos 1–3 completos (técnica estéril, medios y diluciones, cultivo celular: descongelar, pasar con tripsina, contar, congelar, detectar contaminación). Progreso guardado en este navegador.</p>
     </div></div>)}
   </div>);
 }
