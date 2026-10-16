@@ -1,0 +1,1 @@
+export const READING = { title: "Hallmarks of aging: An expanding universe", authors: "López-Otín C., Blasco M.A., Partridge L., Serrano M., Kroemer G.", year: 2023, journal: "Cell 186(2):243–278", url: "https://doi.org/10.1016/j.cell.2022.11.001" };
