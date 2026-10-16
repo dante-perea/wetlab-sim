@@ -4,6 +4,7 @@ import { useGame, MISSIONS, FIXED, SUBS, total, hoodReady, READY_MS, FLASK_AREA,
 import { READING } from "@/lib/reading";
 import Micro from "./Micro";
 
+const MODS = [...new Set(MISSIONS.map(x => x.module))];
 const fmt = (c: Record<string, number>) => Object.entries(c).filter(([, v]) => v > 0.5).map(([k, v]) => `${SUBS[k]?.name ?? k} ${Math.round(v)} µL`).join(" + ") || "vacío";
 export function Hud({ lock }: { lock: () => void }) {
   const s = useGame(); const m = MISSIONS[s.missionIdx];
@@ -18,10 +19,10 @@ export function Hud({ lock }: { lock: () => void }) {
   else if (a.type === "fixed") aimTxt = `${FIXED[a.id].label} — ${FIXED[a.id].hint}`; else if (a.type === "surface" && held && a.up) aimTxt = "[E] Dejar aquí";
   const incub = Object.values(s.items).find(i => i.loc === "incubator" && i.kind === "cflask");
   return (<div className="hud">
-    <div className="cross" />
+    <div className={`cross ${a.type === "item" || a.type === "fixed" ? "hot" : ""}`} />
     {s.loaded && !s.scopeOpen && <div className="mission">
       <div className="mhead">Módulo {m ? m.module : "—"} · Misión {Math.min(s.missionIdx + 1, MISSIONS.length)}/{MISSIONS.length} <b style={{ float: "right" }}>⭐ {score}</b></div>
-      <div className="bar"><i style={{ width: `${(Object.keys(s.completed).length / MISSIONS.length) * 100}%` }} /></div>
+      <div className="dots">{MODS.map(md => (<div key={md} className={`modchip ${m?.module === md ? "cur" : ""}`}><span>M{md}</span><div className="pips">{MISSIONS.filter(x => x.module === md).map(x => <i key={x.id} className={s.completed[x.id] !== undefined ? "done" : m?.id === x.id ? "now" : ""} />)}</div></div>))}</div>
       {m ? (<><h3>{m.title}</h3><p>{m.todo}</p><p className="why">💡 <b>Por qué importa:</b> {m.why}</p><p className="hint">🧭 {m.hint} <span className="small">(el rombo amarillo marca el objetivo)</span></p></>) : (<><h3>🎉 Fin del prototipo</h3><p>Completaste todas las misiones disponibles (módulos 1–3 parcial). Faltan: pasar y congelar células, contaminación en cultivo, MTT/tripán, SA-β-gal, PCR, gel, qPCR y Western. Puntaje: {score}.</p></>)}
       <div className="status">🥼 {s.ppe ? "EPP ✓" : "sin EPP"} · 🌀 Campana: {!s.hoodOn ? "apagada" : ready ? "lista" : `estabilizando ${warm}s`} · 🧴 {s.hoodClean ? "desinfectada" : "sin desinfectar"}{incub ? ` · 🧫 incubando ${Math.round((incub.cells / FLASK_AREA / CONF_100) * 100)} %` : ""}</div>
     </div>}

@@ -156,11 +156,12 @@ export function Hood({ on, ready, clean }: { on: boolean; ready: boolean; clean:
   </group>);
 }
 export function TipBox() {
-  const pts = useMemo(() => { const a: [number, number][] = []; for (let i = 0; i < 8; i++) for (let j = 0; j < 4; j++) a.push([-0.07 + i * 0.02, -0.04 + j * 0.025 + 0.01]); return a; }, []);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => { const o = new THREE.Object3D(); let n = 0; for (let i = 0; i < 8; i++) for (let j = 0; j < 4; j++) { o.position.set(-0.07 + i * 0.02, 0.07, -0.04 + j * 0.025 + 0.01); o.updateMatrix(); ref.current!.setMatrixAt(n++, o.matrix); } ref.current!.instanceMatrix.needsUpdate = true; }, []);
   return (<group>
     <mesh position={[0, 0.025, 0]}><boxGeometry args={[0.18, 0.05, 0.12]} /><Plastic c="#3aa89c" /></mesh>
     <mesh position={[0, 0.0505, 0]}><boxGeometry args={[0.172, 0.002, 0.112]} /><Plastic c="#e9fffb" /></mesh>
-    {pts.map(([x, z], i) => <mesh key={i} position={[x, 0.07, z]}><cylinderGeometry args={[0.0058, 0.0014, 0.045, 8]} />{glass}</mesh>)}
+    <instancedMesh ref={ref} args={[undefined, undefined, 32]}><cylinderGeometry args={[0.0058, 0.0014, 0.045, 8]} />{glass}</instancedMesh>
     <mesh position={[0, 0.07, 0.07]} rotation={[0.2, 0, 0]}><boxGeometry args={[0.18, 0.005, 0.04]} /><Plastic c="#2f8d83" /></mesh>
     <mesh position={[0, 0.1, 0]}><boxGeometry args={[0.2, 0.1, 0.14]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh>
   </group>);

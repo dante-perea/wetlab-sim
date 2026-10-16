@@ -1,8 +1,8 @@
 "use client";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { PointerLockControls, Environment, RoundedBox } from "@react-three/drei";
+import { PointerLockControls, Environment, RoundedBox, PerformanceMonitor } from "@react-three/drei";
 import { Physics, RigidBody, CuboidCollider, CylinderCollider, RapierRigidBody } from "@react-three/rapier";
 import { EffectComposer, Bloom, ToneMapping, SMAA, Vignette, N8AO } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
@@ -114,10 +114,16 @@ function Marker() {
   return <>{ids.map((id, i) => (<group key={id} ref={el => { refs.current[i] = el; }}><mesh><octahedronGeometry args={[0.04, 0]} /><meshStandardMaterial color="#ffc400" emissive="#ffb000" emissiveIntensity={2.5} toneMapped={false} /></mesh><mesh rotation={[Math.PI / 2, 0, 0]}><torusGeometry args={[0.07, 0.004, 8, 24]} /><meshBasicMaterial color="#ffd54a" toneMapped={false} /></mesh></group>))}</>;
 }
 
+export type Tier = "low" | "high";
+export function detectTier(): Tier {
+  if (typeof window === "undefined") return "high"; const q = /[?&]q=(low|high)/.exec(location.search); if (q) return q[1] as Tier;
+  try { const c = document.createElement("canvas"); const g = c.getContext("webgl2") || c.getContext("webgl"); const ext = g?.getExtension("WEBGL_debug_renderer_info"); const r = ext ? String(g!.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : ""; if (/swiftshader|llvmpipe|software|basic render|mali-[0-4]|adreno \(tm\) [1-3]\d\d|intel\(r\) hd/i.test(r)) return "low"; } catch {}
+  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2) return "low"; return "high";
+}
 const keys = new Set<string>();
 function Player() {
   const { camera } = useThree(); const dir = useMemo(() => new THREE.Vector3(), []); const right = useMemo(() => new THREE.Vector3(), []); const vel = useMemo(() => new THREE.Vector3(), []); const want = useMemo(() => new THREE.Vector3(), []);
-  const ray = useMemo(() => new THREE.Raycaster(), []); const last = useRef(""); const phase = useRef(0); const stepSide = useRef(0);
+  const dragging = useRef(false); const dragAt = useRef(0); const ray = useMemo(() => new THREE.Raycaster(), []); const last = useRef(""); const phase = useRef(0); const stepSide = useRef(0);
   useEffect(() => { camera.position.set(0, 1.65, 3); camera.rotation.set(-0.35, 0, 0, "YXZ"); (window as any).__cam = camera; }, [camera]);
   useEffect(() => {
     const G = () => useGame.getState();
@@ -127,10 +133,11 @@ function Player() {
       else if (e.code === "ArrowUp") { G().adjust(100); e.preventDefault(); } else if (e.code === "ArrowDown") { G().adjust(-100); e.preventDefault(); }
       else if (e.code === "ArrowRight") { G().adjust(1); e.preventDefault(); } else if (e.code === "ArrowLeft") { G().adjust(-1); e.preventDefault(); }
     };
-    const ku = (e: KeyboardEvent) => keys.delete(e.code); const md = (e: MouseEvent) => { if (e.button === 0 && G().locked) G().use(); };
+    const ku = (e: KeyboardEvent) => keys.delete(e.code); const md = (e: MouseEvent) => { if (e.button !== 0 || !G().locked) return; const g = G(); if (!g.held && g.aim.type === "item") { g.interact(); dragging.current = g.held === null && !!G().held; dragAt.current = Date.now(); } else g.use(); };
+    const mu = (e: MouseEvent) => { if (e.button === 0 && dragging.current && G().locked && Date.now() - dragAt.current > 350) { G().interact(); } dragging.current = false; };
     const wh = (e: WheelEvent) => { if (!G().locked) return; const dy = e.deltaY || e.deltaX; G().adjust((dy < 0 ? 1 : -1) * (e.shiftKey ? 1 : 10)); };
-    window.addEventListener("keydown", kd); window.addEventListener("keyup", ku); window.addEventListener("mousedown", md); window.addEventListener("wheel", wh);
-    return () => { window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("mousedown", md); window.removeEventListener("wheel", wh); };
+    window.addEventListener("keydown", kd); window.addEventListener("keyup", ku); window.addEventListener("mousedown", md); window.addEventListener("mouseup", mu); window.addEventListener("wheel", wh);
+    return () => { window.removeEventListener("mouseup", mu); window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("mousedown", md); window.removeEventListener("wheel", wh); };
   }, []);
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.05); camera.getWorldDirection(dir); dir.y = 0; dir.normalize(); right.set(-dir.z, 0, dir.x);
@@ -146,13 +153,17 @@ function Player() {
   });
   return null;
 }
+function Diag() { const { gl } = useThree(); useEffect(() => { (window as any).__gl = gl; }, [gl]); return null; }
+function PerfGuard({ tier, setTier }: { tier: Tier; setTier: (t: Tier) => void }) {
+  return <PerformanceMonitor flipflops={2} onDecline={() => { if (tier === "high") setTier("low"); }} />;
+}
 function Shadowify() {
   const { scene } = useThree();
   useEffect(() => { const run = () => scene.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh && m.material) { const mat = m.material as THREE.Material; const tr = mat.transparent && (mat as any).opacity < 0.9; m.castShadow = !tr; m.receiveShadow = true; } }); run(); const t = setInterval(run, 1500); return () => clearInterval(t); }, [scene]);
   return null;
 }
-function Effects() {
-  const low = typeof window !== "undefined" && /q=low/.test(location.search);
+function Effects({ tier }: { tier: Tier }) {
+  const low = tier === "low";
   if (low) return <EffectComposer multisampling={0}><ToneMapping mode={ToneMappingMode.ACES_FILMIC} /></EffectComposer>;
   return (<EffectComposer multisampling={0}>
     <N8AO aoRadius={0.45} distanceFalloff={0.8} intensity={2.4} quality="medium" />
@@ -161,19 +172,19 @@ function Effects() {
   </EffectComposer>);
 }
 export default function Scene({ lockRef }: { lockRef: React.MutableRefObject<(() => void) | null> }) {
-  const scope = useGame(s => s.scopeOpen); const ctl = useRef<any>(null); useEffect(() => { lockRef.current = () => ctl.current?.lock(); }, [lockRef]);
-  return (<Canvas frameloop={scope ? "never" : "always"} shadows="soft" dpr={[1, 1.5]} camera={{ fov: 68, near: 0.04, far: 40 }} gl={{ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: true }}>
+  const [tier, setTier] = useState<Tier>("high"); useEffect(() => { setTier(detectTier()); }, []); const scope = useGame(s => s.scopeOpen); const ctl = useRef<any>(null); useEffect(() => { lockRef.current = () => ctl.current?.lock(); }, [lockRef]);
+  return (<Canvas frameloop={scope ? "never" : "always"} shadows="soft" dpr={tier === "low" ? [0.75, 1] : [1, 1.5]} camera={{ fov: 68, near: 0.04, far: 40 }} gl={{ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: true }}>
     <color attach="background" args={["#cfd8dd"]} />
     <Suspense fallback={null}>
       <Environment files="/hdri/lab.hdr" environmentIntensity={0.55} />
       <hemisphereLight args={["#ffffff", "#8a949b", 0.35]} />
-      <directionalLight castShadow position={[3, 6, 4]} intensity={1.6} shadow-mapSize={[2048, 2048]} shadow-camera-left={-7} shadow-camera-right={7} shadow-camera-top={6} shadow-camera-bottom={-6} shadow-camera-near={0.5} shadow-camera-far={18} shadow-bias={-0.0005} shadow-radius={5} />
+      <directionalLight castShadow position={[3, 6, 4]} intensity={1.6} shadow-mapSize={tier === "low" ? [1024, 1024] : [2048, 2048]} shadow-camera-left={-7} shadow-camera-right={7} shadow-camera-top={6} shadow-camera-bottom={-6} shadow-camera-near={0.5} shadow-camera-far={18} shadow-bias={-0.0005} shadow-radius={5} />
       <Physics gravity={[0, -9.81, 0]}>
         <Statics /><Room /><HoodLive /><Station />{IDS.map(id => <ItemBody key={id} id={id} />)}
       </Physics>
-      <Held /><Droplet /><Marker /><Shadowify /><Effects />
+      <Held /><Droplet /><Marker /><Shadowify /><Effects tier={tier} /><Diag />
     </Suspense>
-    <Player />{!scope && <PointerLockControls ref={ctl} pointerSpeed={0.8} onLock={() => useGame.getState().setLocked(true)} onUnlock={() => useGame.getState().setLocked(false)} />}
+    <Player /><PerfGuard tier={tier} setTier={setTier} />{!scope && <PointerLockControls ref={ctl} pointerSpeed={0.8} onLock={() => useGame.getState().setLocked(true)} onUnlock={() => useGame.getState().setLocked(false)} />}
   </Canvas>);
 }
 void RoundedBox; void Steel; void Label;
