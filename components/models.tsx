@@ -65,6 +65,7 @@ export function Pipette({ tip, loaded, loadedFrac, plunger = 0, set }: { tip: bo
     <Hit r={0.03} h={0.38} y={-0.05} /></group>);
 }
 
+const SHORT: Record<string, string> = { primers: "Pr", dna: "ADN", ladder: "M", dye: "TC", primT: "Pd", primR: "Pr", cdnaC: "cC", cdnaT: "cT" };
 export function ItemMesh({ item, tip, loaded, loadedFrac = 0, plunger = 0, set = 200 }: { item: Item; tip?: boolean; loaded?: THREE.Color | null; loadedFrac?: number; plunger?: number; set?: number }) {
   const col = useMemo(() => liquidColor(item), [item]); const fill = item.cap ? Math.min(1, total(item.contents) / item.cap) : 0;
   const k = item.kind; const P = PROF[k as Kind];
@@ -95,7 +96,7 @@ export function ItemMesh({ item, tip, loaded, loadedFrac = 0, plunger = 0, set =
     {outer && <mesh geometry={outer}>{glass}</mesh>}
     {fill > 0 && P && <Liquid kind={k} fill={Math.min(1, Math.sqrt(fill) * (k === "tube" ? 0.9 : 1))} color={col} contaminated={item.contaminated} />}
     {k === "tube" && <><Cap r={0.02} y={d.h + 0.003} c={cap} h={0.012} /><mesh position={[0.022, d.h, 0]}><boxGeometry args={[0.012, 0.01, 0.014]} /><Plastic c={cap} /></mesh>
-      <Label text={item.id.replace("tube", "")} w={0.026} h={0.026} pos={[0, 0.07, 0.0204]} bg="#fff" font={90} /></>}
+      <Label text={SHORT[item.id] ?? item.id.replace("tube", "")} w={0.026} h={0.026} pos={[0, 0.07, 0.0204]} bg="#fff" font={90} /></>}
     {(k === "bottle" || k === "flask") && <><Cap r={k === "bottle" ? 0.024 : 0.024} y={d.h + 0.004} c={cap} h={0.018} />
       <Label text={item.id === "pbs" ? "PBS" : item.id === "medio" ? "DMEM\n+ rojo fenol" : item.id === "sfb" ? "SFB" : item.id === "stock" ? "STOCK\n10 mg/mL" : item.id === "tripan" ? "TRIPÁN\n0,4 %" : item.id === "tripsina" ? "TRIPSINA\nEDTA" : item.id === "dmso" ? "DMSO" : item.label} w={0.07} h={0.06} pos={[0, 0.07, k === "bottle" ? 0.0505 : 0.052]} rot={k === "flask" ? [-0.38, 0, 0] : [0, 0, 0]} font={34} /></>}
     {k === "cryo" && <><Cap r={0.016} y={d.h + 0.005} c={cap} h={0.012} />{item.frozen && <mesh position={[0, 0.03, 0]}><cylinderGeometry args={[0.0125, 0.0105, 0.04, 14]} /><meshStandardMaterial color="#e9f6ff" emissive="#9fd6ff" emissiveIntensity={0.2} roughness={0.9} /></mesh>}<Label text="HeLa\np12" w={0.02} h={0.02} pos={[0, 0.04, 0.0162]} font={40} /></>}
@@ -179,20 +180,28 @@ export function Bath({ running }: { running: boolean }) {
     <Label text={running ? "37.0 °C" : "OFF"} w={0.12} h={0.04} pos={[0.12, 0.05, 0.1505]} bg="#06130b" fg="#6dff9b" font={46} emissive />
   </group>);
 }
-export function Centrifuge() {
+export function Centrifuge({ running = false }: { running?: boolean }) {
+  const rot = useRef<THREE.Group>(null); useFrame((_, dt) => { if (rot.current && running) rot.current.rotation.y += dt * 22; });
   return (<group><RoundedBox args={[0.5, 0.22, 0.46]} radius={0.04} smoothness={4} position={[0, 0.11, 0]}><Plastic c="#eef1f3" r={0.3} /></RoundedBox>
-    <mesh position={[0, 0.235, 0]}><sphereGeometry args={[0.2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} /><meshPhysicalMaterial color="#9fb5c4" transparent opacity={0.55} roughness={0.1} clearcoat={1} /></mesh>
-    <Label text="CENTRÍFUGA" w={0.22} h={0.035} pos={[0, 0.07, 0.2325]} bg="#20262b" fg="#9fd0ff" font={28} emissive /></group>);
+    <group ref={rot} position={[0, 0.225, 0]}><mesh><cylinderGeometry args={[0.14, 0.14, 0.02, 20]} /><Steel c="#9aa3a9" /></mesh>{[0, 1, 2, 3, 4, 5].map(i => <mesh key={i} position={[Math.cos(i * 1.047) * 0.1, 0.02, Math.sin(i * 1.047) * 0.1]}><cylinderGeometry args={[0.018, 0.018, 0.04, 10]} /><Plastic c="#2b3036" /></mesh>)}</group>
+    <mesh position={[0, 0.235, 0]}><sphereGeometry args={[0.2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} /><meshPhysicalMaterial color="#9fb5c4" transparent opacity={0.45} roughness={0.1} clearcoat={1} depthWrite={false} /></mesh>
+    <Label text={running ? "GIRANDO…" : "CENTRÍFUGA"} w={0.22} h={0.035} pos={[0, 0.07, 0.2325]} bg="#20262b" fg={running ? "#6dff9b" : "#9fd0ff"} font={28} emissive />
+    <mesh position={[0, 0.2, 0]}><boxGeometry args={[0.42, 0.18, 0.4]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh></group>);
 }
-export function Thermocycler() {
+export function Thermocycler({ status = "PCR\nlisto" }: { status?: string }) {
   return (<group><RoundedBox args={[0.38, 0.14, 0.36]} radius={0.02} smoothness={4} position={[0, 0.07, 0]}><Plastic c="#2b3036" r={0.35} /></RoundedBox>
     <mesh position={[0, 0.15, -0.02]}><boxGeometry args={[0.28, 0.025, 0.2]} /><Steel c="#8b949a" /></mesh>
-    <Label text={"PCR  95 °C\nCiclo 0/30"} w={0.12} h={0.05} pos={[0.1, 0.09, 0.1805]} bg="#06130b" fg="#6dff9b" font={24} emissive /></group>);
+    {Array.from({ length: 12 }, (_, i) => <mesh key={i} position={[-0.1 + (i % 6) * 0.04, 0.166, -0.06 + Math.floor(i / 6) * 0.08]}><cylinderGeometry args={[0.012, 0.012, 0.01, 10]} /><meshStandardMaterial color="#444b52" metalness={0.8} roughness={0.4} /></mesh>)}
+    <Label text={status} w={0.13} h={0.06} pos={[0.1, 0.09, 0.1805]} bg="#06130b" fg="#6dff9b" font={30} emissive />
+    <mesh position={[0, 0.2, 0]}><boxGeometry args={[0.34, 0.14, 0.32]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh></group>);
 }
-export function GelBox() {
+export function GelBox({ T = 0, lanes = 0, running = false }: { T?: number; lanes?: number; running?: boolean }) {
   return (<group><mesh position={[0, 0.03, 0]}><boxGeometry args={[0.26, 0.06, 0.18]} />{glass}</mesh>
-    <mesh position={[0, 0.02, 0]}><boxGeometry args={[0.2, 0.016, 0.12]} /><meshPhysicalMaterial color="#c9f0d8" transparent opacity={0.7} /></mesh>
-    <mesh position={[0.13, 0.065, 0.05]}><cylinderGeometry args={[0.005, 0.005, 0.02, 8]} /><Emit c="#d02020" i={1} /></mesh><mesh position={[0.13, 0.065, -0.05]}><cylinderGeometry args={[0.005, 0.005, 0.02, 8]} /><meshStandardMaterial color="#222" /></mesh></group>);
+    <mesh position={[0, 0.02, 0]}><boxGeometry args={[0.2, 0.016, 0.12]} /><meshPhysicalMaterial color={running ? "#bfe4ff" : "#c9f0d8"} transparent opacity={0.7} /></mesh>
+    {Array.from({ length: lanes }, (_, i) => <mesh key={i} position={[-0.085, 0.0295, -0.045 + i * 0.018]}><boxGeometry args={[0.012, 0.002, 0.012]} /><meshStandardMaterial color="#2b67ff" emissive="#2b67ff" emissiveIntensity={0.8} /></mesh>)}
+    {lanes > 0 && <mesh position={[-0.085 + T * 0.17, 0.0295, 0]}><boxGeometry args={[0.004, 0.002, 0.11]} /><meshStandardMaterial color="#2b67ff" emissive="#2b67ff" emissiveIntensity={1.4} /></mesh>}
+    <mesh position={[0.13, 0.065, 0.05]}><cylinderGeometry args={[0.005, 0.005, 0.02, 8]} /><Emit c="#d02020" i={1} /></mesh><mesh position={[0.13, 0.065, -0.05]}><cylinderGeometry args={[0.005, 0.005, 0.02, 8]} /><meshStandardMaterial color="#222" /></mesh>
+    <mesh position={[0, 0.06, 0]}><boxGeometry args={[0.28, 0.1, 0.2]} /><meshBasicMaterial transparent opacity={0} depthWrite={false} /></mesh></group>);
 }
 export function Coat() {
   return (<group><mesh position={[0, 0.9, 0]}><cylinderGeometry args={[0.025, 0.03, 1.8, 12]} /><Steel c="#6b7278" /></mesh>

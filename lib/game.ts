@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import { sfx } from "./sound";
+import { pcrResult, ctFor, bandsFor, interpSize, travel, PCR_RUN_MS, GEL_FULL_MS, AMPLICON, LADDER, type PcrRes, type Lane } from "./molbio";
 
 export type V3 = [number, number, number];
 export type Contents = Record<string, number>;
 export type Kind = "tube" | "bottle" | "flask" | "pipette" | "ethanol" | "cryo" | "cflask" | "hemo";
 export type Loc = null | "incubator" | "scope" | "bath" | "freezer" | "gone" | "centrifuge" | "thermo" | "gel" | "reader";
-export type Item = { id: string; kind: Kind; label: string; pos: V3; cap: number; contents: Contents; contaminated: boolean; reason?: string; cells: number; loc: Loc; bathMs: number; thawed: boolean; frozen: boolean; washed?: boolean; tryMs?: number; detached?: boolean; blind?: boolean; viewed?: boolean; via?: number; frozenOk?: boolean; spun?: boolean; mttMs?: number; extra?: Record<string, number | string | boolean> };
+export type Item = { id: string; kind: Kind; label: string; pos: V3; cap: number; contents: Contents; contaminated: boolean; reason?: string; cells: number; loc: Loc; bathMs: number; thawed: boolean; frozen: boolean; washed?: boolean; tryMs?: number; detached?: boolean; blind?: boolean; viewed?: boolean; via?: number; frozenOk?: boolean; spun?: boolean; mttMs?: number; extra?: Record<string, number | string | boolean>; pcr?: PcrRes; ct?: { ct: number | null; gene: string | null; sample: string | null; note: string } };
 export type Tip = { contaminated: boolean; lastSource: string | null };
 export type Pip = { set: number; tip: Tip | null; loaded: Contents; loadedContam: boolean; loadedCells: number; loadedVia: number };
 export type Aim = { type: "item" | "fixed" | "surface" | null; id: string; up: boolean };
@@ -18,6 +19,9 @@ export const CONF_100 = 1.2e5; // células/cm² al 100 %
 export const SUBS: Record<string, { name: string; color: string }> = {
   medio: { name: "Medio DMEM", color: "#e0507a" }, pbs: { name: "PBS", color: "#bfe3ff" }, stock: { name: "Stock 10 mg/mL", color: "#3b6fff" },
   sfb: { name: "SFB (suero)", color: "#c98a3a" }, celulas: { name: "Suspensión celular + DMSO", color: "#e9a9b8" }, tripan: { name: "Azul de tripán", color: "#1b2a9a" }, tripsina: { name: "Tripsina-EDTA", color: "#f3e3b0" }, dmso: { name: "DMSO", color: "#e8eef2" },
+  dna: { name: "ADN molde", color: "#d9d2f2" }, primers: { name: "Cebadores 10 µM", color: "#9fe3c0" }, mm: { name: "Master mix 2×", color: "#f2e6a0" }, agua: { name: "Agua libre de nucleasas", color: "#eaf6ff" },
+  ladder: { name: "Marcador 100 pb", color: "#9fb6ff" }, dye: { name: "Tampón de carga 6×", color: "#4ea1ff" }, primT: { name: "Cebadores gen diana", color: "#8be0a8" }, primR: { name: "Cebadores gen referencia", color: "#e6a8f0" },
+  cdnaC: { name: "cDNA control", color: "#d8e4ff" }, cdnaT: { name: "cDNA tratado", color: "#ffd8e0" },
 };
 export const DIM: Record<Kind, { r: number; h: number }> = {
   tube: { r: 0.02, h: 0.1 }, bottle: { r: 0.05, h: 0.17 }, flask: { r: 0.07, h: 0.16 }, pipette: { r: 0.016, h: 0.3 }, ethanol: { r: 0.035, h: 0.2 },
@@ -32,9 +36,9 @@ export const FIXED: Record<string, { label: string; hint: string; pos: V3 }> = {
   microscope: { label: "Microscopio", hint: "[E] con la muestra en la mano: platina · sin nada: mirar", pos: [-5.5, 1.35, -0.4] },
   bath: { label: "Baño termostático 37 °C", hint: "[E] con el criovial en la mano: descongelar", pos: [5.45, 1.05, 2.0] },
   freezer: { label: "Congelador −80 °C", hint: "[E] con un criovial en la mano: congelar", pos: [5.45, 1.0, 3.7] },
-  centrifuge: { label: "Centrífuga", hint: "(próximamente)", pos: [5.5, 1.2, -1.4] },
-  thermocycler: { label: "Termociclador", hint: "Módulo 6 (próximamente)", pos: [5.5, 1.1, 0.4] },
-  gel: { label: "Cámara de electroforesis", hint: "Módulo 6 (próximamente)", pos: [-5.5, 1.1, 1.4] },
+  centrifuge: { label: "Centrífuga", hint: "(sin uso en las misiones actuales)", pos: [5.5, 1.2, -1.4] },
+  thermocycler: { label: "Termociclador / qPCR", hint: "[E] con un tubo: colocarlo · [E] con la mano vacía: programa y arranque", pos: [5.5, 1.1, 0.4] },
+  gel: { label: "Cámara de electroforesis (gel 1,5 % agarosa)", hint: "Pipeta cargada: clic para cargar el pocillo · [E] mano vacía: fuente / ver gel", pos: [-5.5, 1.1, 1.4] },
 };
 export const SLOT: Record<Exclude<Loc, null>, V3> = { incubator: [-5.3, 0.63, -3.95], scope: [-5.46, 1.155, -0.4], bath: [5.5, 0.96, 2.0], freezer: [5.4, 1.0, 3.7], gone: [0, -5, 0], centrifuge: [5.5, 1.13, -1.4], thermo: [5.5, 1.05, 0.4], gel: [-5.5, 0.97, 1.4], reader: [-5.5, 1.0, 2.3] };
 export const HIDDEN = new Set<string>(["gone", "freezer"]);
@@ -49,7 +53,7 @@ export const getPos = (s: Pick<G, "items">, id: string): V3 => livePos[id] ?? s.
 export function initialItems(): Record<string, Item> {
   const mk = (id: string, kind: Kind, label: string, pos: V3, cap: number, contents: Contents = {}, extra: Partial<Item> = {}): Item => ({ id, kind, label, pos, cap, contents, contaminated: false, cells: 0, loc: null, bathMs: 0, thawed: false, frozen: false, ...extra });
   return Object.fromEntries([
-    mk("pipette", "pipette", "Micropipeta (2–1000 µL)", [-3.2, 0.9, -3.9], 0),
+    mk("pipette", "pipette", "Micropipeta (1–1000 µL)", [-3.2, 0.9, -3.9], 0),
     mk("ethanol", "ethanol", "Spray de etanol 70 %", [-2.7, 0.9, -3.9], 0),
     mk("medio", "flask", "Frasco de medio DMEM", [-2.1, 0.9, -3.9], 100000, { medio: 30000 }),
     mk("pbs", "flask", "Frasco de PBS", [-1.6, 0.9, -3.9], 100000, { pbs: 30000 }),
@@ -62,6 +66,19 @@ export function initialItems(): Record<string, Item> {
     mk("cA", "cflask", "Frasco A (otro grupo)", [-4.7, 0.9, -3.5], 12000, { medio: 3000 }, { cells: 1.2e6, blind: true }),
     mk("cB", "cflask", "Frasco B (otro grupo)", [-4.3, 0.9, -3.5], 12000, { medio: 3000 }, { cells: 1.2e6, contaminated: true, reason: "contaminación bacteriana", blind: true }),
     mk("cC", "cflask", "Frasco C (otro grupo)", [-3.9, 0.9, -3.5], 12000, { medio: 3000 }, { cells: 1.2e6, blind: true }),
+    mk("mm", "bottle", "Master mix 2× (Taq, dNTP, MgCl₂)", [-3.55, 0.9, -3.5], 5000, { mm: 2000 }),
+    mk("primers", "tube", "Cebadores 10 µM (producto de 500 pb)", [-3.25, 0.9, -3.5], 1000, { primers: 200 }),
+    mk("dna", "tube", "ADN molde (plásmido)", [-2.95, 0.9, -3.5], 1000, { dna: 200 }),
+    mk("agua", "bottle", "Agua libre de nucleasas", [-2.65, 0.9, -3.5], 10000, { agua: 5000 }),
+    mk("ladder", "tube", "Marcador de peso molecular 100 pb", [-2.35, 0.9, -3.5], 500, { ladder: 40, dye: 10 }),
+    mk("dye", "tube", "Tampón de carga 6×", [-2.05, 0.9, -3.5], 500, { dye: 200 }),
+    mk("tubeP1", "tube", "Tubo PCR 1 (muestra)", [-1.75, 0.9, -3.5], 300),
+    mk("tubeP2", "tube", "Tubo PCR 2 (control negativo)", [-1.45, 0.9, -3.5], 300),
+    mk("primT", "tube", "Cebadores gen diana", [1.6, 0.9, -3.5], 1000, { primT: 200 }),
+    mk("primR", "tube", "Cebadores gen referencia", [1.9, 0.9, -3.5], 1000, { primR: 200 }),
+    mk("cdnaC", "tube", "cDNA control", [2.2, 0.9, -3.5], 1000, { cdnaC: 200 }),
+    mk("cdnaT", "tube", "cDNA tratado (fármaco)", [2.5, 0.9, -3.5], 1000, { cdnaT: 200 }),
+    mk("tubeQ1", "tube", "qPCR 1", [3.3, 0.9, -3.5], 300), mk("tubeQ2", "tube", "qPCR 2", [3.6, 0.9, -3.5], 300), mk("tubeQ3", "tube", "qPCR 3", [3.9, 0.9, -3.5], 300), mk("tubeQ4", "tube", "qPCR 4", [4.2, 0.9, -3.5], 300),
     mk("tube1", "tube", "Tubo 1", [3.0, 0.9, -3.9], 2000),
     mk("tube2", "tube", "Tubo 2", [3.25, 0.9, -3.9], 2000),
     mk("tube3", "tube", "Tubo 3", [3.5, 0.9, -3.9], 2000),
@@ -100,9 +117,25 @@ export const MISSIONS: Mission[] = [
   { id: "m3-9", module: 3, title: "Siembra 2×10⁵ células", todo: "Con tu conteo, pipetea al Tubo 5 el volumen del frasco que contenga ≈ 2×10⁵ células vivas (±20 %).", why: "Sembrar un número conocido de células hace los experimentos reproducibles.", hint: "Volumen (µL) = 2×10⁵ ÷ (células vivas/mL) × 1000.", target: () => ["tube5", "cflask"], check: s => near(s.items.tube5.cells * (s.items.tube5.via ?? s.viab), 2e5, 4e4) && clean(s.items.tube5) },
   { id: "m3-10", module: 3, title: "Congela células (criopreservación)", todo: "En el Criovial 2 prepara 1000 µL: 450 µL de células del frasco + 450 µL de medio + 100 µL de DMSO (10 %). Ponlo ya en el congelador −80 °C (E apuntándolo).", why: "Sin crioprotector se forman cristales de hielo que rompen las células; con demasiado DMSO es tóxico. Se añade en frío y se congela enseguida.", hint: "Congelador en la pared derecha, al fondo cerca de ti. Punta nueva entre reactivos; DMSO cerca del Tubo 5.", target: s => (s.items.cryo2.loc === "freezer" ? [] : ["cryo2", "dmso", "freezer"]), check: s => s.items.cryo2.loc === "freezer" && !!s.items.cryo2.frozenOk, apply: (p, s) => { p.items = { ...(p.items ?? s.items), cryo2: { ...s.items.cryo2, loc: "freezer", pos: SLOT.freezer, frozen: true, frozenOk: true, cells: 5e5, contents: { medio: 450, dmso: 100, celulas: 450 } } }; } },
   { id: "m3-11", module: 3, title: "Detecta el cultivo contaminado", todo: "Tres frascos de otros compañeros (A, B, C, banco izquierdo). Mira cada uno al microscopio y tira a residuos (E apuntando «Residuos» con el frasco en la mano) solo el contaminado.", why: "Una contaminación bacteriana no siempre se ve a simple vista; si no la detectas, infecta todo tu cultivo. Se descarta y se desinfecta.", hint: "Bacterias: puntitos que se mueven; el medio puede verse turbio. No tires un frasco sano: cuenta como error.", target: s => ["cA", "cB", "cC"].filter(id => s.items[id].loc !== "gone"), check: s => s.items.cB.loc === "gone" && s.items.cA.loc !== "gone" && s.items.cC.loc !== "gone", apply: (p, s) => { p.items = { ...(p.items ?? s.items), cB: { ...s.items.cB, loc: "gone", pos: SLOT.gone } }; } },
+  { id: "m6-1", module: 6, title: "PCR: prepara la mezcla (20 µL)", todo: "En el Tubo PCR 1, dentro de la campana: 10 µL master mix 2× + 2 µL cebadores + 1 µL ADN molde + 7 µL agua. Punta nueva para cada reactivo.", why: "La PCR es muy sensible: una proporción mala de Mg²⁺/cebadores baja el rendimiento o crea productos falsos. Primero lo barato (agua), el ADN al final.", hint: "Pipeta a 10, 2, 1 y 7 µL. Reactivos en el banco, fila delantera izquierda (master mix, cebadores, ADN, agua).", target: s => ["tubeP1", "mm", "primers", "dna", "agua"].filter(id => !s.items[id].loc), check: s => { const c = s.items.tubeP1.contents; return near(c.mm, 10, 1.2) && near(c.primers, 2, 0.6) && near(c.dna, 1, 0.6) && near(c.agua, 7, 1.5) && clean(s.items.tubeP1); }, apply: (p, s) => { p.items = { ...(p.items ?? s.items), tubeP1: { ...s.items.tubeP1, contents: { mm: 10, primers: 2, dna: 1, agua: 7 } } }; } },
+  { id: "m6-2", module: 6, title: "Control negativo", todo: "En el Tubo PCR 2 prepara lo mismo pero SIN ADN: 10 µL master mix + 2 µL cebadores + 8 µL agua.", why: "Si el control negativo da banda, hay contaminación con ADN (de un amplicón previo, de tus guantes…) y el resultado de la muestra no vale nada.", hint: "El agua sustituye al ADN. Cambia de punta.", target: s => ["tubeP2", "mm", "primers", "agua"].filter(id => !s.items[id].loc), check: s => { const c = s.items.tubeP2.contents; return near(c.mm, 10, 1.2) && near(c.primers, 2, 0.6) && (c.dna ?? 0) < 0.3 && near(c.agua, 8, 1.5) && clean(s.items.tubeP2); }, apply: (p, s) => { p.items = { ...(p.items ?? s.items), tubeP2: { ...s.items.tubeP2, contents: { mm: 10, primers: 2, agua: 8 } } }; } },
+  { id: "m6-3", module: 6, title: "Termociclador", todo: "Pon los dos tubos en el bloque (E), abre el programa con la mano vacía (E): elige hibridación ≈ Tm−5 °C (los cebadores tienen Tm 58 °C) y 25–35 ciclos. Enter arranca.", why: "Desnaturaliza (95 °C) → hibrida (Tm−5) → extiende (72 °C). Si hibridas muy frío, los cebadores se pegan donde no deben; muy caliente, no se pegan.", hint: "←→ temperatura de hibridación, ↑↓ ciclos, Enter inicia. Espera ~9 s.", target: s => (Object.values(s.items).filter(i => i.loc === "thermo").length < 2 ? ["tubeP1", "tubeP2", "thermocycler"] : ["thermocycler"]), check: s => !!s.items.tubeP1.pcr && !!s.items.tubeP2.pcr, apply: (p, s) => { p.items = { ...(p.items ?? s.items), tubeP1: { ...s.items.tubeP1, loc: "thermo", pos: SLOT.thermo, pcr: { yield: 0.95, nonspec: false, smear: false, falsePos: false, dimers: false, note: "ok" } }, tubeP2: { ...s.items.tubeP2, loc: "thermo", pos: SLOT.thermo, pcr: { yield: 0, nonspec: false, smear: false, falsePos: false, dimers: false, note: "sin molde" } } }; } },
+  { id: "m6-4", module: 6, title: "Tampón de carga", todo: "Saca los tubos y añade 4 µL de tampón de carga 6× a cada uno (punta nueva).", why: "El tampón da densidad (la muestra se hunde en el pocillo) y un colorante para ver cuánto ha corrido.", hint: "Tubos en la campana; tampón de carga en el banco (fila delantera).", target: s => ["tubeP1", "tubeP2", "dye"].filter(id => (s.items[id].contents.dye ?? 0) < 3 || id === "dye"), check: s => ["tubeP1", "tubeP2"].every(id => near(s.items[id].contents.dye, 4, 1.2) && clean(s.items[id])), apply: (p, s) => { const it = (p.items ?? s.items); p.items = { ...it, tubeP1: { ...it.tubeP1, contents: { ...it.tubeP1.contents, dye: 4 } }, tubeP2: { ...it.tubeP2, contents: { ...it.tubeP2.contents, dye: 4 } } }; } },
+  { id: "m6-5", module: 6, title: "Carga el gel", todo: "Con 6–12 µL por pocillo carga, en este orden: marcador, Tubo PCR 1, Tubo PCR 2 (punta nueva cada vez; clic en la cámara de electroforesis).", why: "El marcador de peso te permite saber el tamaño del fragmento; sin él no puedes interpretar la banda.", hint: "Aspira → apunta a la cámara (pared izquierda) → clic. Máx. ~15 µL por pocillo.", target: s => ["ladder", "tubeP1", "tubeP2", "gel"], check: s => s.gel.lanes.some(l => l.kind === "ladder" && !l.lost) && ["tubeP1", "tubeP2"].every(id => s.gel.lanes.some(l => l.src === id && !l.lost)), apply: (p, s) => { p.gel = { ...s.gel, lanes: [{ src: "ladder", label: "Marcador", kind: "ladder", vol: 8, lost: false, bands: bandsFor("ladder", 8).bands, smear: false, spill: false }, { src: "tubeP1", label: "Muestra", kind: "sample", vol: 10, lost: false, bands: [{ size: 500, i: 0.95 }], smear: false, spill: false }, { src: "tubeP2", label: "Control negativo", kind: "sample", vol: 10, lost: false, bands: [], smear: false, spill: false }] }; } },
+  { id: "m6-6", module: 6, title: "Corre el gel", todo: "Con la mano vacía [E] en la cámara: fuente de poder. ≈100 V; Enter para empezar y Enter otra vez cuando el frente del azul llegue ~3/4 del gel (no más de 150 V).", why: "Voltaje alto calienta y deforma las bandas; parar tarde saca los fragmentos pequeños del gel; parar pronto no los separa.", hint: "↑↓ voltaje (antes de empezar). Corre ~7–9 s a 100 V.", target: () => ["gel"], check: s => s.gel.done && s.gel.T >= 0.45 && s.gel.T <= 1.0 && s.gel.volt <= 150, apply: (p, s) => { p.gel = { ...(p.gel ?? s.gel), done: true, T: 0.8, volt: 100 }; } },
+  { id: "m6-7", module: 6, title: "Lee el gel", todo: "[E] en la cámara: transiluminador. Haz clic en la banda de tu muestra: el juego interpola su tamaño con el marcador (debe ser ≈500 pb) y el control negativo debe salir limpio.", why: "El tamaño se lee comparando con el marcador en escala logarítmica. Una banda en el control negativo invalida todo.", hint: "Si ves banda en el control negativo o bandas extra, repite la PCR (gel nuevo con G en la fuente, otro programa).", target: () => ["gel"], check: s => s.gel.estOk > 0 && s.gel.lanes.filter(l => l.src === "tubeP2").every(l => l.bands.length === 0), apply: (p, s) => { p.gel = { ...(p.gel ?? s.gel), estOk: 1 }; } },
+  { id: "m6-8", module: 6, title: "qPCR: prepara 4 reacciones (10 µL)", todo: "qPCR 1: 5 µL master mix + 1 µL cebadores diana + 1 µL cDNA control + 3 µL agua. qPCR 2: igual con cDNA tratado. qPCR 3 y 4: cebadores referencia con cDNA control y tratado.", why: "Un gen de referencia (que no cambia) corrige diferencias de cantidad de cDNA entre muestras: sin él no puedes comparar.", hint: "Diana+control, diana+tratado, referencia+control, referencia+tratado.", target: () => ["tubeQ1", "mm", "primT", "primR", "cdnaC", "cdnaT"], check: s => { const ok = (id: string, pr: string, cd: string) => { const c = s.items[id].contents; return near(c.mm, 5, 0.9) && near(c[pr], 1, 0.45) && near(c[cd], 1, 0.45) && near(c.agua, 3, 1.1) && (c[pr === "primT" ? "primR" : "primT"] ?? 0) < 0.2 && (c[cd === "cdnaC" ? "cdnaT" : "cdnaC"] ?? 0) < 0.2 && clean(s.items[id]); }; return ok("tubeQ1", "primT", "cdnaC") && ok("tubeQ2", "primT", "cdnaT") && ok("tubeQ3", "primR", "cdnaC") && ok("tubeQ4", "primR", "cdnaT"); }, apply: (p, s) => { const it = { ...(p.items ?? s.items) }; const mkq = (id: string, pr: string, cd: string) => { it[id] = { ...s.items[id], contents: { mm: 5, [pr]: 1, [cd]: 1, agua: 3 } }; }; mkq("tubeQ1", "primT", "cdnaC"); mkq("tubeQ2", "primT", "cdnaT"); mkq("tubeQ3", "primR", "cdnaC"); mkq("tubeQ4", "primR", "cdnaT"); p.items = it; } },
+  { id: "m6-9", module: 6, title: "qPCR: corre y calcula ΔΔCt", todo: "Pon los 4 tubos en el bloque, abre el equipo, pulsa M para modo qPCR y Enter. Con los Ct calcula el cambio de expresión: ΔCt = Ct diana − Ct ref; ΔΔCt = ΔCt tratado − ΔCt control; cambio = 2^(−ΔΔCt). Ajústalo con ←→ y confirma con Enter.", why: "El Ct es el ciclo donde la fluorescencia cruza el umbral: cada ciclo menos = el doble de molde. Así se mide expresión génica relativa.", hint: "Los 4 tubos juntos en el bloque. La tabla de Ct aparece al terminar (≈8 s).", target: () => ["thermocycler"], check: s => s.qa.ok > 0 },
 ];
 
+export type Panel = null | "thermo" | "gel" | "gelview" | "cf" | "reader";
+export type Thermo = { mode: "pcr" | "qpcr"; anneal: number; cycles: number; runStart: number | null; runs: number; mqpcr: number };
+export type GelS = { lanes: Lane[]; volt: number; running: boolean; T: number; done: boolean; est: { lane: number; size: number } | null; estOk: number; startedAt: number | null };
+export type Cf = { rpm: number; min: number; runStart: number | null; runMs: number; runs: number; last: string };
+export type Qa = { fold: number | null; ok: number };
 export interface G {
+  panel: Panel; thermo: Thermo; gel: GelS; cf: Cf; qa: Qa;
+  openPanel(p: Panel): void; closePanel(): void; setThermo(p: Partial<Thermo>): void; startThermo(): void; setCf(p: Partial<Cf>): void; startCf(): void; gelVolt(d: number): void; gelToggle(): void; gelClear(): void; gelEst(lane: number, size: number): void; qAnswer(l2: number): void;
   items: Record<string, Item>; held: string | null; pip: Pip; ppe: boolean; hoodOn: boolean; hoodOnAt: number; hoodClean: boolean; viab: number;
   ejects: number; resets: number; errors: number; scopeViews: number; countOk: number; lastCount: { mean: number; conc: number; ok: boolean; via?: number } | null; viabOk: number;
   completed: Record<string, number>; missionIdx: number; base: { ejects: number; resets: number; errors: number; scopeViews: number; countOk: number };
@@ -112,7 +145,7 @@ export interface G {
 }
 const KEY = "wetlab3d-v2";
 let tid = 1;
-const fresh = () => ({ items: initialItems(), held: null as string | null, pip: { set: 200, tip: null, loaded: {}, loadedContam: false, loadedCells: 0, loadedVia: 0.93 } as Pip, ppe: false, hoodOn: false, hoodOnAt: 0, hoodClean: false, viab: 0.93 });
+const fresh = () => ({ panel: null as Panel, thermo: { mode: "pcr", anneal: 50, cycles: 20, runStart: null, runs: 0, mqpcr: 0 } as Thermo, gel: { lanes: [], volt: 100, running: false, T: 0, done: false, est: null, estOk: 0, startedAt: null } as GelS, cf: { rpm: 3000, min: 5, runStart: null, runMs: 0, runs: 0, last: "" } as Cf, qa: { fold: null, ok: 0 } as Qa, items: initialItems(), held: null as string | null, pip: { set: 200, tip: null, loaded: {}, loadedContam: false, loadedCells: 0, loadedVia: 0.93 } as Pip, ppe: false, hoodOn: false, hoodOnAt: 0, hoodClean: false, viab: 0.93 });
 const clearLive = () => { for (const k of Object.keys(livePos)) delete livePos[k]; };
 
 function workCheck(s: G, pos: V3): string | null {
@@ -156,9 +189,47 @@ export const useGame = create<G>((set, get) => {
         if (it.loc === "bath" && it.frozen) { const b = it.bathMs + dtS * 1000; const th = b >= 6000; items = { ...items, [id]: { ...items[id], bathMs: b, frozen: !th, thawed: th || it.thawed } }; changed = true; if (th) msgs.push("El hielo se fundió: saca el criovial ya."); }
         else if (it.loc === "bath" && it.thawed) { const b = it.bathMs + dtS * 1000; items = { ...items, [id]: { ...items[id], bathMs: b } }; changed = true; if (b > 14000 && it.bathMs <= 14000) { set({ viab: 0.55 }); msgs.push("Demasiado tiempo a 37 °C con DMSO: viabilidad baja."); } }
       }
+      const sx = get();
+      if (sx.thermo.runStart && now - sx.thermo.runStart >= (sx.thermo.mode === "pcr" ? PCR_RUN_MS : 8000)) {
+        const th = sx.thermo; let n = 0;
+        for (const id in items) { const it = items[id]; if (it.loc !== "thermo") continue; n++; items = { ...items, [id]: th.mode === "pcr" ? { ...it, pcr: pcrResult(it.contents, it.contaminated, th.anneal, th.cycles) } : { ...it, ct: ctFor(it.contents, id) } }; }
+        changed = true; set({ thermo: { ...th, runStart: null, runs: th.runs + (th.mode === "pcr" ? 1 : 0), mqpcr: th.mqpcr + (th.mode === "qpcr" ? 1 : 0) } }); msgs.push(th.mode === "pcr" ? `PCR terminada (${n} tubos). El resultado se ve en el gel.` : `qPCR terminada: revisa los Ct en la pantalla del equipo.`); sfx.chime();
+      }
+      if (sx.gel.running) { const g = sx.gel; const T = g.T + (g.volt / 100) * ((now - s0.lastTick) / GEL_FULL_MS) * 0.85; set({ gel: { ...g, T } }); }
+      if (sx.cf.runStart && now - sx.cf.runStart >= sx.cf.runMs) {
+        const c = sx.cf; let notes = ""; for (const id in items) { const it = items[id]; if (it.loc !== "centrifuge") continue; const good = c.rpm >= 3000 && c.min >= 3; items = { ...items, [id]: { ...it, spun: good, ...(c.rpm > 5000 && it.cells > 0 && !it.via ? { via: 0.5 } : {}) } }; notes = good ? "pellet formado" : "poco tiempo/velocidad: sin pellet claro"; }
+        changed = true; set({ cf: { ...c, runStart: null, runs: c.runs + 1, last: notes } }); msgs.push(`Centrifugación terminada: ${notes}.`); sfx.chime();
+      }
       set({ now, lastTick: now, ...(changed ? { items } : {}) });
       msgs.forEach(m => say(m, "info")); syncHood(); evaluate();
     },
+    openPanel(p) { set({ panel: p, locked: false }); },
+    closePanel() { set({ panel: null }); },
+    setThermo(p) { if (get().thermo.runStart) return; set(s => ({ thermo: { ...s.thermo, ...p, anneal: Math.max(40, Math.min(72, p.anneal ?? s.thermo.anneal)), cycles: Math.max(5, Math.min(45, p.cycles ?? s.thermo.cycles)) } })); sfx.click(); },
+    startThermo() {
+      const s = get(); if (s.thermo.runStart) return; const tubes = Object.values(s.items).filter(i => i.loc === "thermo"); if (!tubes.length) return say("Coloca primero los tubos en el bloque (E con el tubo en la mano).", "info");
+      set({ thermo: { ...s.thermo, runStart: Date.now() } }); sfx.click(); say(s.thermo.mode === "pcr" ? `Programa PCR: 95 °C → ${s.thermo.anneal} °C → 72 °C × ${s.thermo.cycles} ciclos.` : "qPCR en marcha: se mide la fluorescencia en cada ciclo.", "info");
+    },
+    setCf(p) { if (get().cf.runStart) return; set(s => ({ cf: { ...s.cf, ...p, rpm: Math.max(1000, Math.min(15000, p.rpm ?? s.cf.rpm)), min: Math.max(1, Math.min(20, p.min ?? s.cf.min)) } })); sfx.click(); },
+    startCf() {
+      const s = get(); if (s.cf.runStart) return; const t = Object.values(s.items).filter(i => i.loc === "centrifuge"); if (!t.length) return say("Pon tubos en el rotor (E con el tubo en la mano).", "info");
+      if (t.length % 2) return bad("Rotor desbalanceado: pon un número par de tubos, uno frente a otro (usa un tubo con agua como contrapeso).");
+      const v = t.map(i => total(i.contents)).sort((a, b) => a - b); for (let i = 0; i < v.length; i += 2) if (Math.abs(v[i] - v[i + 1]) > 20) return bad("Rotor desbalanceado: los tubos opuestos deben pesar casi igual (±20 µL). A alta velocidad se rompe el rotor.");
+      const ms = 2000 + s.cf.min * 300; set({ cf: { ...s.cf, runStart: Date.now(), runMs: ms } }); sfx.click(); say(`Centrifugando ${s.cf.rpm} rpm · ${s.cf.min} min (acelerado).`, "info");
+    },
+    gelVolt(d) { const g = get().gel; if (g.running || g.done) return; set({ gel: { ...g, volt: Math.max(30, Math.min(200, g.volt + d)) } }); sfx.click(); },
+    gelToggle() {
+      const g = get().gel; if (g.done) return;
+      if (!g.running) { if (!g.lanes.length) return say("Carga primero el gel con la pipeta.", "info"); set({ gel: { ...g, running: true, startedAt: Date.now() } }); say("Electroforesis en marcha: el ADN (carga −) migra hacia el polo +. Para cuando el frente llegue ~3/4.", "info"); }
+      else { set({ gel: { ...g, running: false, done: true } }); say(`Electroforesis detenida (recorrido ${Math.round(g.T * 100)} %). Mira el gel con [E].`, "ok"); }
+      evaluate();
+    },
+    gelClear() { const g = get().gel; if (g.running) return; set({ gel: { ...g, lanes: [], T: 0, done: false, est: null, running: false, startedAt: null } }); say("Gel nuevo colocado (pocillos vacíos).", "info"); },
+    gelEst(lane, size) {
+      const g = get().gel; const L = g.lanes[lane]; set({ gel: { ...g, est: { lane, size } } });
+      const ok = L && L.kind === "sample" && L.bands.length && Math.abs(size - AMPLICON) / AMPLICON <= 0.15; if (ok) { set({ gel: { ...get().gel, estOk: get().gel.estOk + 1 } }); say(`Tamaño estimado ${Math.round(size)} pb ≈ producto esperado (500 pb) ✓`, "ok"); } else say(`Estimado ${Math.round(size)} pb: no coincide con el producto esperado (500 pb).`, "info"); evaluate();
+    },
+    qAnswer(l2) { const t = Math.log2(4); const ok = Math.abs(l2 - t) <= 0.5; set(s => ({ qa: { fold: Math.pow(2, l2), ok: s.qa.ok + (ok ? 1 : 0) } })); if (ok) say(`Cambio de expresión ≈ ${Math.pow(2, l2).toFixed(1)}× ✓ (2^−ΔΔCt)`, "ok"); else bad(`Con ${Math.pow(2, l2).toFixed(1)}× no cuadra: ΔΔCt = (Ct diana−Ct ref)tratado − (Ct diana−Ct ref)control; cambio = 2^(−ΔΔCt).`); evaluate(); },
     setLocked(b) { set({ locked: b }); if (b) sfx.start(); },
     setAim(a) { set({ aim: a }); },
     setScope(b) { set({ scopeOpen: b, ...(b ? { locked: false } : {}) }); if (b) { set(s => { const st = Object.values(s.items).find(i => i.loc === "scope"); return { scopeViews: s.scopeViews + 1, items: st ? { ...s.items, [st.id]: { ...st, viewed: true } } : s.items }; }); evaluate(); } },
@@ -169,7 +240,7 @@ export const useGame = create<G>((set, get) => {
     },
     wipe() { try { localStorage.removeItem(KEY); } catch {} clearLive(); set({ ...fresh(), viabOk: 0, completed: {}, missionIdx: 0, errors: 0, ejects: 0, resets: 0, scopeViews: 0, countOk: 0, lastCount: null, base: { ejects: 0, resets: 0, errors: 0, scopeViews: 0, countOk: 0 } } as any); syncHood(); },
     reset() { clearLive(); set({ ...fresh(), ppe: get().ppe, hoodOn: get().hoodOn, hoodOnAt: get().hoodOnAt, hoodClean: get().hoodClean, resets: get().resets + 1 } as any); say("Laboratorio repuesto: material nuevo y estéril (se descartó el anterior).", "info"); evaluate(); },
-    adjust(d) { const p = get().pip; const v = Math.max(2, Math.min(1000, p.set + d)); if (v !== p.set) sfx.click(); set({ pip: { ...p, set: v } }); },
+    adjust(d) { const p = get().pip; const v = Math.max(1, Math.min(1000, p.set + d)); if (v !== p.set) sfx.click(); set({ pip: { ...p, set: v } }); },
     eject() {
       const s = get(); if (s.held !== "pipette") return; if (!s.pip.tip) return say("La pipeta no tiene punta.", "info");
       sfx.tip(); set({ pip: { ...s.pip, tip: null, loaded: {}, loadedContam: false, loadedCells: 0, loadedVia: 0.93 }, ejects: s.ejects + 1 }); say("Punta descartada en residuos.", "ok"); evaluate();
@@ -177,11 +248,14 @@ export const useGame = create<G>((set, get) => {
     interact() {
       const s = get(); const a = s.aim; const here = (id: string) => livePos[id] ?? s.items[id].pos;
       if (!s.held) {
-        if (a.type === "item") { const it = s.items[a.id]; sfx.grab(); const items = it.loc ? { ...s.items, [a.id]: { ...it, loc: null } } : s.items; upd({ held: a.id, items }); return; }
+        if (a.type === "item") { const it = s.items[a.id]; if ((it.loc === "thermo" && s.thermo.runStart) || (it.loc === "centrifuge" && s.cf.runStart)) return say("El equipo está en marcha: espera a que termine.", "info"); sfx.grab(); const items = it.loc ? { ...s.items, [a.id]: { ...it, loc: null } } : s.items; upd({ held: a.id, items }); return; }
         if (a.type === "fixed") {
           if (a.id === "coat") { if (s.ppe) say("Ya llevas bata y guantes.", "info"); else { upd({ ppe: true }); sfx.grab(); say("Te pusiste bata y guantes.", "ok"); } }
           else if (a.id === "hoodSwitch") { sfx.click(); if (s.hoodOn) { upd({ hoodOn: false }); say("Campana apagada.", "info"); } else { upd({ hoodOn: true, hoodOnAt: Date.now() }); say("Campana encendida: espera a que se estabilice (~8 s).", "info"); } syncHood(); }
           else if (a.id === "microscope") { const st = Object.values(s.items).find(i => i.loc === "scope"); if (!st) say("Coloca primero una muestra en la platina (frasco de cultivo o cámara de Neubauer).", "info"); else get().setScope(true); }
+          else if (a.id === "thermocycler") { if (!Object.values(s.items).some(i => i.loc === "thermo")) say("Coloca primero tubos en el bloque (E con el tubo en la mano).", "info"); else get().openPanel("thermo"); }
+          else if (a.id === "gel") get().openPanel(s.gel.done ? "gelview" : "gel");
+          else if (a.id === "centrifuge") get().openPanel("cf");
           else say(`${FIXED[a.id].label}: ${FIXED[a.id].hint}`, "info");
         }
         return;
@@ -193,18 +267,19 @@ export const useGame = create<G>((set, get) => {
         if (it.blind && !it.viewed) bad("Lo descartaste sin mirarlo al microscopio: acertaste de casualidad, comprueba siempre antes.");
         sfx.clink(); upd({ held: null, items: { ...s.items, [it.id]: { ...it, loc: "gone", pos: SLOT.gone } } }); say(it.contaminated ? "Cultivo contaminado descartado en residuos (en el lab real: lejía antes de tirarlo)." : "Frasco descartado.", "ok"); return;
       }
-      if (a.type === "fixed" && ["incubator", "microscope", "bath", "freezer"].includes(a.id)) {
-        const loc = a.id === "incubator" ? "incubator" : a.id === "bath" ? "bath" : a.id === "freezer" ? "freezer" : "scope";
-        const ok = loc === "incubator" ? it.kind === "cflask" || it.kind === "tube" : loc === "bath" ? it.kind === "cryo" : loc === "freezer" ? it.kind === "cryo" : it.kind === "cflask" || it.kind === "hemo";
+      if (a.type === "fixed" && ["incubator", "microscope", "bath", "freezer", "thermocycler", "centrifuge"].includes(a.id)) {
+        const loc: Exclude<Loc, null> = a.id === "incubator" ? "incubator" : a.id === "bath" ? "bath" : a.id === "freezer" ? "freezer" : a.id === "thermocycler" ? "thermo" : a.id === "centrifuge" ? "centrifuge" : "scope";
+        if ((loc === "thermo" && s.thermo.runStart) || (loc === "centrifuge" && s.cf.runStart)) return say("El equipo está en marcha.", "info");
+        const ok = loc === "thermo" || loc === "centrifuge" ? it.kind === "tube" || it.kind === "cryo" : loc === "incubator" ? it.kind === "cflask" || it.kind === "tube" : loc === "bath" ? it.kind === "cryo" : loc === "freezer" ? it.kind === "cryo" : it.kind === "cflask" || it.kind === "hemo";
         if (!ok) return say(`${FIXED[a.id].label}: eso no va aquí. ${FIXED[a.id].hint}`, "info");
         if (Object.values(s.items).some(i => i.loc === loc && i.id !== it.id) && loc === "scope") return say("La platina ya está ocupada.", "info");
-        sfx.clink(); const n = Object.values(s.items).filter(i => i.loc === loc && i.id !== it.id).length; const b = SLOT[loc]; const pos: V3 = loc === "incubator" || loc === "bath" ? [b[0], b[1], b[2] + [0, 0.11, -0.11, 0.22][n % 4]] : b; livePos[it.id] = pos;
+        sfx.clink(); const n = Object.values(s.items).filter(i => i.loc === loc && i.id !== it.id).length; const b = SLOT[loc]; const pos: V3 = loc === "incubator" || loc === "bath" ? [b[0], b[1], b[2] + [0, 0.11, -0.11, 0.22][n % 4]] : loc === "thermo" || loc === "centrifuge" ? [b[0] + [-0.06, 0.06, -0.02, 0.02, -0.1, 0.1][n % 6] * 0.5, b[1], b[2] + [-0.08, -0.04, 0, 0.04, 0.08, 0.12][n % 6]] : b; livePos[it.id] = pos;
         let nit: Item = { ...it, pos, loc };
         if (loc === "incubator" && it.kind === "cflask" && it.cells > 0 && it.detached && !((it.contents.tripsina ?? 0) > 300)) nit.detached = false;
         if (loc === "freezer") { const t = Math.max(1, total(it.contents)); const f = (it.contents.dmso ?? 0) / t; const good = f >= 0.05 && f <= 0.15 && it.cells > 0; nit = { ...nit, frozen: true, frozenOk: good, via: good ? it.via : 0.3 };
           if (!good) bad(f < 0.05 ? "Sin (suficiente) DMSO: se formarán cristales de hielo y las células morirán al descongelar." : f > 0.15 ? "Demasiado DMSO: es tóxico para las células." : "El criovial no tiene células."); else say("Criovial a −80 °C. En el lab real: caja con isopropanol (−1 °C/min) y luego nitrógeno líquido.", "ok"); upd({ held: null, items: { ...s.items, [it.id]: nit } }); return; }
         upd({ held: null, items: { ...s.items, [it.id]: nit } });
-        say(loc === "incubator" ? "Frasco en la incubadora: el tiempo corre ×14 400." : loc === "bath" ? "Criovial en el baño: espera a que se funda el hielo." : "Muestra en la platina. Sin nada en la mano, pulsa E para mirar.", "info"); return;
+        say(loc === "thermo" ? "Tubo en el bloque. Con la mano vacía, [E] abre el programa." : loc === "centrifuge" ? "Tubo en el rotor. [E] con la mano vacía: velocidad y tiempo." : loc === "incubator" ? "Frasco en la incubadora: el tiempo corre ×14 400." : loc === "bath" ? "Criovial en el baño: espera a que se funda el hielo." : "Muestra en la platina. Sin nada en la mano, pulsa E para mirar.", "info"); return;
       }
       if (a.type === "surface" && a.up) {
         const [x, y, z] = aimRef.point; sfx.clink(); let pip = s.pip; const pos: V3 = [x, y + 0.01, z]; livePos[it.id] = pos;
@@ -226,6 +301,17 @@ export const useGame = create<G>((set, get) => {
       if (a.type === "fixed" && a.id === "waste") {
         if (!total(pip.loaded)) return say("La pipeta está vacía. Aspira algo y vacíalo aquí.", "info");
         sfx.pipette(false); set({ pip: { ...pip, loaded: {}, loadedCells: 0, loadedContam: false }, pipAnim: { kind: "disp", at: Date.now() } }); say("Líquido descartado en residuos.", "ok"); evaluate(); return;
+      }
+      if (a.type === "fixed" && a.id === "gel") {
+        if (!total(pip.loaded) || !pip.tip) return say("Aspira antes la muestra con una punta nueva y luego carga el pocillo.", "info");
+        const g = s.gel; if (g.running || g.done) return say("El gel ya corrió o está corriendo. Pon un gel nuevo desde la fuente (tecla G en el panel).", "info"); if (g.lanes.length >= 6) return say("El gel solo tiene 6 pocillos.", "info");
+        const vol = total(pip.loaded); const srcId = pip.tip.lastSource ?? ""; const src = s.items[srcId]; const kind: "ladder" | "sample" = srcId === "ladder" ? "ladder" : "sample";
+        const dyeF = (pip.loaded.dye ?? 0) / vol; const problems: string[] = []; let lost = false; let eff = vol;
+        if (dyeF < 0.08) { lost = true; problems.push("Sin tampón de carga la muestra no se hunde en el pocillo: se difunde y se pierde."); }
+        if (vol > 15) { eff = 15; problems.push(`El pocillo admite ~15 µL: se derramaron ${Math.round(vol - 15)} µL.`); } if (vol < 3) problems.push("Volumen muy pequeño: la banda saldrá muy tenue.");
+        const bb = bandsFor(kind, eff, src?.pcr); const lane: Lane = { src: srcId, label: kind === "ladder" ? "Marcador" : src?.label ?? srcId, kind, vol, lost, bands: lost ? [] : bb.bands, smear: lost ? false : bb.smear, spill: vol > 15 };
+        sfx.pipette(false); set({ gel: { ...g, lanes: [...g.lanes, lane] }, pip: { ...pip, loaded: {}, loadedCells: 0, loadedContam: false }, pipAnim: { kind: "disp", at: Date.now() } });
+        if (problems.length) bad(problems.join(" ")); else say(`Pocillo ${g.lanes.length + 1} cargado (${Math.round(vol)} µL de ${kind === "ladder" ? "marcador" : src?.label ?? srcId}).`, "ok"); evaluate(); return;
       }
       if (a.type === "fixed" && a.id === "tipbox") {
         if (pip.tip) return say("Ya tienes una punta puesta (R para descartarla).", "info");

@@ -93,7 +93,9 @@ function HoodLive() {
 }
 function Station() {
   const ready = useGame(s => { void s.now; return Object.values(s.items).some(i => i.loc === "incubator"); });
-  const lit = useGame(s => Object.values(s.items).some(i => i.loc === "scope")); const bath = useGame(s => Object.values(s.items).some(i => i.loc === "bath"));
+  const lit = useGame(s => Object.values(s.items).some(i => i.loc === "scope"));
+  const cfRun = useGame(s => !!s.cf.runStart); const gelT = useGame(s => Math.round(s.gel.T * 50) / 50); const gelLanes = useGame(s => s.gel.lanes.length); const gelRun = useGame(s => s.gel.running);
+  const thLcd = useGame(s => { const t = s.thermo; if (!t.runStart) return `${t.mode === "pcr" ? "PCR" : "qPCR"}  ${t.anneal} °C\n${t.cycles} ciclos`; const p = Math.min(1, (s.now - t.runStart) / (t.mode === "pcr" ? 9000 : 8000)); return t.mode === "pcr" ? `PCR  ${[95, t.anneal, 72][Math.floor(p * t.cycles * 3) % 3]} °C\nCiclo ${Math.min(t.cycles, Math.floor(p * t.cycles) + 1)}/${t.cycles}` : `qPCR\nCiclo ${Math.floor(p * 40)}/40`; }); const bath = useGame(s => Object.values(s.items).some(i => i.loc === "bath"));
   return (<>
     <Fixed id="hoodSwitch" pos={[0.9, 1.72, -3.405]}><mesh><boxGeometry args={[0.26, 0.09, 0.02]} /><meshStandardMaterial color="#20262a" roughness={0.4} /></mesh><mesh position={[0.05, 0, 0.012]}><boxGeometry args={[0.06, 0.04, 0.012]} /><Plastic c="#9aa3a9" /></mesh></Fixed>
     <Fixed id="tipbox" pos={TIPBOX_POS}><TipBox /></Fixed>
@@ -102,10 +104,10 @@ function Station() {
     <Fixed id="incubator" pos={[-5.3, 0, -4.0]}><Incubator ready={ready} /></Fixed>
     <Fixed id="microscope" pos={[-5.5, 0.9, -0.4]} rot={Math.PI / 2}><Microscope lit={lit} /></Fixed>
     <Fixed id="freezer" pos={[5.5, 0, 3.7]}><Freezer /></Fixed>
-    <Fixed id="gel" pos={[-5.5, 0.9, 1.4]} rot={Math.PI / 2}><GelBox /></Fixed>
+    <Fixed id="gel" pos={[-5.5, 0.9, 1.4]} rot={Math.PI / 2}><GelBox T={gelT} lanes={gelLanes} running={gelRun} /></Fixed>
     <Fixed id="bath" pos={[5.5, 0.9, 2.0]} rot={-Math.PI / 2}><Bath running={true} />{void bath}</Fixed>
-    <Fixed id="centrifuge" pos={[5.5, 0.9, -1.4]} rot={-Math.PI / 2}><Centrifuge /></Fixed>
-    <Fixed id="thermocycler" pos={[5.5, 0.9, 0.4]} rot={-Math.PI / 2}><Thermocycler /></Fixed>
+    <Fixed id="centrifuge" pos={[5.5, 0.9, -1.4]} rot={-Math.PI / 2}><Centrifuge running={cfRun} /></Fixed>
+    <Fixed id="thermocycler" pos={[5.5, 0.9, 0.4]} rot={-Math.PI / 2}><Thermocycler status={thLcd} /></Fixed>
   </>);
 }
 function Marker() {
@@ -173,7 +175,7 @@ function Effects({ tier }: { tier: Tier }) {
   </EffectComposer>);
 }
 export default function Scene({ lockRef }: { lockRef: React.MutableRefObject<(() => void) | null> }) {
-  const [tier, setTier] = useState<Tier>("high"); useEffect(() => { setTier(detectTier()); }, []); const scope = useGame(s => s.scopeOpen); const ctl = useRef<any>(null); useEffect(() => { lockRef.current = () => ctl.current?.lock(); }, [lockRef]);
+  const [tier, setTier] = useState<Tier>("high"); useEffect(() => { setTier(detectTier()); }, []); const scope = useGame(s => s.scopeOpen || !!s.panel); const ctl = useRef<any>(null); useEffect(() => { lockRef.current = () => ctl.current?.lock(); }, [lockRef]);
   return (<Canvas frameloop={scope ? "never" : "always"} shadows="soft" dpr={tier === "low" ? [0.75, 1] : [1, 1.5]} camera={{ fov: 68, near: 0.04, far: 40 }} gl={{ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: true }}>
     <color attach="background" args={["#cfd8dd"]} />
     <Suspense fallback={null}>
